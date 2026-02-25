@@ -1,3 +1,4 @@
+// src/components/maps/PeruMap.tsx
 "use client";
 
 import "leaflet/dist/leaflet.css";
@@ -5,113 +6,183 @@ import L from "leaflet";
 import { useEffect, useMemo } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 
-export type MapItem = {
+type Pin = {
   id: string;
   title: string;
-  city: string;
-  district: string;
-  address: string;
-  pricePen: number;
-  operation: string;
-  type: string;
   lat: number;
   lng: number;
+  priceLabel: string;
+  subtitle?: string;
+  href: string;
+  featured?: boolean;
+  verified?: boolean;
 };
 
-function formatPEN(value: number) {
-  return value.toLocaleString("es-PE");
+type Props = {
+  pins: Pin[];
+  fallbackCenter?: [number, number];
+  fallbackZoom?: number;
+};
+
+const DEFAULT_CENTER: [number, number] = [-9.19, -75.0152];
+const DEFAULT_ZOOM = 5;
+
+function useFixLeafletIcons() {
+  useEffect(() => {
+    // @ts-expect-error private
+    delete (L.Icon.Default.prototype as any)._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl:
+        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+      shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    });
+  }, []);
 }
 
-// Bounds “Perú + un poco” para que el mapa siempre se vea correcto
-const PERU_BOUNDS = L.latLngBounds(
-  L.latLng(-18.5, -81.6),
-  L.latLng(-0.0, -68.6)
-);
-
-function FitPins({ items }: { items: MapItem[] }) {
+function FitBounds({ pins }: { pins: Pin[] }) {
   const map = useMap();
-
   useEffect(() => {
-    if (!map) return;
-
-    const pins = items
-      .filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lng))
-      .map((i) => L.latLng(i.lat, i.lng));
-
-    if (pins.length >= 2) {
-      map.fitBounds(L.latLngBounds(pins).pad(0.2), { animate: true });
-      return;
-    }
-
-    if (pins.length === 1) {
-      map.setView(pins[0], 12, { animate: true });
-      return;
-    }
-
-    map.fitBounds(PERU_BOUNDS.pad(0.08), { animate: true });
-  }, [items, map]);
-
+    if (pins.length < 2) return;
+    const bounds = L.latLngBounds(pins.map((p) => [p.lat, p.lng] as [number, number])).pad(0.18);
+    map.fitBounds(bounds, { animate: true });
+  }, [map, pins]);
   return null;
 }
 
-export default function PeruMap({
-  items,
-  height = 520,
-}: {
-  items: MapItem[];
-  height?: number;
-}) {
-  const icon = useMemo(() => {
-    // Pin nítido + sombra (pro)
-    return new L.Icon({
-      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-      iconRetinaUrl:
-        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-      shadowUrl:
-        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [0, -36],
-      shadowSize: [41, 41],
-    });
-  }, []);
+function priceMarkerIcon(priceLabel: string, opts?: { featured?: boolean; verified?: boolean }) {
+  const featured = !!opts?.featured;
+  const verified = !!opts?.verified;
+
+  // Sobrio y “caro”: pill con borde, sombra suave, no emojis.
+  const html = `
+    <div class="mcp-pin ${featured ? "mcp-pin--featured" : ""}">
+      <div class="mcp-pin__pill">
+        <span class="mcp-pin__price">${escapeHtml(priceLabel)}</span>
+        ${verified ? `<span class="mcp-pin__dot" aria-hidden="true"></span>` : ""}
+      </div>
+      <div class="mcp-pin__tail"></div>
+    </div>
+  `;
+
+  return L.divIcon({
+    className: "mcp-divicon",
+    html,
+    iconSize: [1, 1],
+    iconAnchor: [0, 0],
+    popupAnchor: [0, -18],
+  });
+}
+
+function escapeHtml(str: string) {
+  return str
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+export function PeruMap({
+  pins,
+  fallbackCenter = DEFAULT_CENTER,
+  fallbackZoom = DEFAULT_ZOOM,
+}: Props) {
+  useFixLeafletIcons();
+
+  const center = useMemo<[number, number]>(() => {
+    if (pins.length === 1) return [pins[0].lat, pins[0].lng];
+    return fallbackCenter;
+  }, [pins, fallbackCenter]);
+
+  const zoom = pins.length === 1 ? 13 : fallbackZoom;
 
   return (
-    <div
-      className="overflow-hidden rounded-3xl border bg-white shadow-[0_25px_60px_-35px_rgba(0,0,0,.45)]"
-      style={{ height }}
-    >
+    <div className="relative">
+      {/* estilos del marker (scoped aquí, sin librerías extra) */}
+      <style>{`
+        .mcp-divicon { background: transparent; border: none; }
+        .mcp-pin { position: relative; transform: translate(-50%, -100%); }
+        .mcp-pin__pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(23,23,23,0.12);
+          background: rgba(255,255,255,0.92);
+          backdrop-filter: blur(8px);
+          box-shadow: 0 10px 26px -18px rgba(0,0,0,0.55);
+          white-space: nowrap;
+        }
+        .mcp-pin__price {
+          font: 600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
+          color: rgba(17,17,17,0.92);
+          letter-spacing: -0.01em;
+        }
+        .mcp-pin__dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: rgba(16,185,129,0.95);
+          box-shadow: 0 0 0 3px rgba(16,185,129,0.18);
+        }
+        .mcp-pin__tail {
+          position: absolute;
+          left: 50%;
+          top: 100%;
+          width: 10px;
+          height: 10px;
+          transform: translate(-50%, -50%) rotate(45deg);
+          background: rgba(255,255,255,0.92);
+          border-right: 1px solid rgba(23,23,23,0.10);
+          border-bottom: 1px solid rgba(23,23,23,0.10);
+          box-shadow: 0 10px 26px -18px rgba(0,0,0,0.55);
+        }
+        .mcp-pin--featured .mcp-pin__pill {
+          border-color: rgba(17,17,17,0.18);
+          box-shadow: 0 12px 34px -20px rgba(0,0,0,0.7);
+        }
+      `}</style>
+
       <MapContainer
-        bounds={PERU_BOUNDS}
-        style={{ height: "100%", width: "100%" }}
+        center={center}
+        zoom={zoom}
         scrollWheelZoom
-        zoomControl
-        maxBounds={PERU_BOUNDS.pad(0.2)}
-        maxBoundsViscosity={0.6}
+        className="h-[420px] w-full lg:h-[calc(100vh-210px)]"
       >
-        {/* Tiles premium sin API key */}
+        {/* Tiles sobrios tipo “producto real” */}
         <TileLayer
-          attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
         />
 
-        <FitPins items={items} />
+        {pins.length > 1 ? <FitBounds pins={pins} /> : null}
 
-        {items.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={icon}>
-            <Popup>
-              <div className="space-y-1">
-                <div className="text-sm font-semibold">{p.title}</div>
-                <div className="text-xs opacity-80">
-                  {p.district}, {p.city}
+        {pins.map((p) => (
+          <Marker
+            key={p.id}
+            position={[p.lat, p.lng]}
+            icon={priceMarkerIcon(p.priceLabel, { featured: p.featured, verified: p.verified })}
+          >
+            <Popup closeButton>
+              <div className="min-w-[240px] max-w-[280px]">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                  {p.priceLabel}
                 </div>
-                <div className="text-xs opacity-70">{p.address}</div>
-                <div className="pt-1 text-sm font-bold">
-                  S/ {formatPEN(p.pricePen)}
+                <div className="mt-1 text-sm font-semibold text-neutral-900">
+                  {p.title}
                 </div>
-                <div className="text-[11px] opacity-70">
-                  {p.operation} • {p.type}
-                </div>
+                {p.subtitle ? (
+                  <div className="mt-1 text-xs text-neutral-600">{p.subtitle}</div>
+                ) : null}
+
+                <a
+                  href={p.href}
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-neutral-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800"
+                >
+                  Ver detalle
+                </a>
               </div>
             </Popup>
           </Marker>
