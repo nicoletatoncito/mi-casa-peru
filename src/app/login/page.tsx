@@ -12,6 +12,7 @@ type LoginFormState = {
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
   const [form, setForm] = useState<LoginFormState>({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,10 +27,11 @@ export default function LoginPage() {
     try {
       const supabase = createBrowserSupabase();
 
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: form.email,
-        password: form.password,
-      });
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email: form.email,
+          password: form.password,
+        });
 
       if (signInError) {
         setError(signInError.message);
@@ -37,21 +39,28 @@ export default function LoginPage() {
         return;
       }
 
-      const userId = signInData?.user?.id;
+      // ✅ Extraemos access token real
+      const accessToken = signInData?.session?.access_token;
 
-      if (!userId) {
-        setError("No se pudo obtener el usuario");
+      if (!accessToken) {
+        setError("No se pudo obtener la sesión (access_token).");
         setLoading(false);
         return;
       }
 
-      await fetch("/api/auth/session", {
+      // ✅ Creamos cookie server-side SOLO si el token es válido
+      const resp = await fetch("/api/auth/session", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ userId }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken }),
       });
+
+      if (!resp.ok) {
+        const j = (await resp.json().catch(() => null)) as any;
+        setError(j?.error || "No se pudo crear la sesión.");
+        setLoading(false);
+        return;
+      }
 
       router.push(redirectTo);
       router.refresh();
@@ -71,19 +80,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div className="space-y-1">
-            <label
-              htmlFor="email"
-              className="text-xs font-semibold text-neutral-700"
-            >
+            <label htmlFor="email" className="text-xs font-semibold text-neutral-700">
               Email
             </label>
             <input
               id="email"
               type="email"
               value={form.email}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, email: e.target.value }))
-              }
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
               className="w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
               autoComplete="email"
               required
@@ -91,30 +95,21 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1">
-            <label
-              htmlFor="password"
-              className="text-xs font-semibold text-neutral-700"
-            >
+            <label htmlFor="password" className="text-xs font-semibold text-neutral-700">
               Contraseña
             </label>
             <input
               id="password"
               type="password"
               value={form.password}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, password: e.target.value }))
-              }
+              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
               className="w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
               autoComplete="current-password"
               required
             />
           </div>
 
-          {error && (
-            <p className="text-xs text-red-600">
-              {error}
-            </p>
-          )}
+          {error && <p className="text-xs text-red-600">{error}</p>}
 
           <button
             type="submit"

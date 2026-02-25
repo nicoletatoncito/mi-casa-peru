@@ -15,12 +15,14 @@ export async function setAdminSessionCookie(userId: string) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
+    secure: process.env.NODE_ENV === "production",
   });
 
   cookieStore.set(ADMIN_USER_ID_COOKIE, userId, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
+    secure: process.env.NODE_ENV === "production",
   });
 }
 
@@ -43,7 +45,6 @@ export async function getUserRole(): Promise<UserRole | null> {
     .maybeSingle();
 
   if (error) {
-    // eslint-disable-next-line no-console
     console.error("Error fetching user role", error);
     return null;
   }
@@ -51,6 +52,7 @@ export async function getUserRole(): Promise<UserRole | null> {
   return (data?.role as UserRole | undefined) ?? "agent";
 }
 
+// ✅ Protege páginas (Server Components) con redirect
 export async function requireAdminSession(redirectTo: string = "/login") {
   const cookieStore = await cookies();
   const value = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
@@ -59,4 +61,20 @@ export async function requireAdminSession(redirectTo: string = "/login") {
 
   const role = await getUserRole();
   if (role !== "admin") redirect(redirectTo);
+}
+
+// ✅ Protege Route Handlers / APIs (NO redirect)
+export async function requireAdminApi(): Promise<
+  { ok: true; userId: string; role: UserRole } | { ok: false; status: number }
+> {
+  const cookieStore = await cookies();
+  const hasSession = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
+  const userId = cookieStore.get(ADMIN_USER_ID_COOKIE)?.value;
+
+  if (!hasSession || !userId) return { ok: false, status: 401 };
+
+  const role = await getUserRole();
+  if (role !== "admin") return { ok: false, status: 403 };
+
+  return { ok: true, userId, role };
 }
