@@ -32,7 +32,7 @@ export type ListingsFilters = {
   maxPrice?: number;
   beds?: number;
   baths?: number;
-  sort?: "newest" | "price_asc" | "price_desc";
+  sort?: "newest" | "price_asc" | "price_desc" | "relevance";
   page?: number; // 1-based
   pageSize?: number;
 };
@@ -52,20 +52,20 @@ function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+/**
+ * Escapa caracteres especiales para ILIKE:
+ * - % y _ son wildcards en SQL LIKE.
+ * - \ es el caracter de escape.
+ */
+function escapeForILike(input: string) {
+  return input.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
 function buildQuery(
   supabase: ReturnType<typeof createServerSupabase>,
   filters: ListingsFilters
 ) {
-  const {
-    q,
-    operation,
-    type,
-    minPrice,
-    maxPrice,
-    beds,
-    baths,
-    sort = "newest",
-  } = filters;
+  const { q, operation, type, minPrice, maxPrice, beds, baths, sort = "newest" } = filters;
 
   let query = supabase
     .from("listings")
@@ -73,7 +73,10 @@ function buildQuery(
     .eq("status", "published");
 
   if (q && q.trim().length >= 2) {
-    const term = q.trim();
+    const term = escapeForILike(q.trim());
+
+    // Nota: usamos ILIKE con patrón %term% para múltiples campos.
+    // El escape evita que el usuario meta % o _ y cambie el patrón.
     query = query.or(
       `title.ilike.%${term}%,city.ilike.%${term}%,district.ilike.%${term}%,address.ilike.%${term}%`
     );
@@ -86,16 +89,21 @@ function buildQuery(
   if (typeof beds === "number") query = query.gte("beds", beds);
   if (typeof baths === "number") query = query.gte("baths", baths);
 
+  // Orden estable: SIEMPRE terminamos con id para evitar saltos por empates
   if (sort === "price_asc") {
     query = query.order("price_pen", { ascending: true, nullsFirst: false });
     query = query.order("created_at", { ascending: false });
+    query = query.order("id", { ascending: true });
   } else if (sort === "price_desc") {
     query = query.order("price_pen", { ascending: false, nullsFirst: false });
     query = query.order("created_at", { ascending: false });
+    query = query.order("id", { ascending: true });
   } else {
+    // "newest" y "relevance" (por ahora: featured/verified/newest)
     query = query.order("featured", { ascending: false });
     query = query.order("verified", { ascending: false });
     query = query.order("created_at", { ascending: false });
+    query = query.order("id", { ascending: true });
   }
 
   return query;
@@ -109,6 +117,7 @@ export async function getLatestListings(limit = 6): Promise<Listing[]> {
     .select(SELECT)
     .eq("status", "published")
     .order("created_at", { ascending: false })
+    .order("id", { ascending: true })
     .limit(limit);
 
   if (error) {
@@ -130,10 +139,7 @@ export async function getPropertiesPaged(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const { data, error, count } = await buildQuery(supabase, filters).range(
-    from,
-    to
-  );
+  const { data, error, count } = await buildQuery(supabase, filters).range(from, to);
 
   if (error) {
     console.error("getPropertiesPaged error:", error);
@@ -152,9 +158,17 @@ export async function getPropertiesPaged(
   };
 }
 
-/** Compat simple */
-export async function getProperties(filters: Omit<ListingsFilters, "page"> = {}) {
-  const res = await getPropertiesPaged({ ...filters, page: 1, pageSize: 60 });
+/** Compat simple (mantiene limit) */
+export async function getProperties(
+  filters: Omit<ListingsFilters, "page" | "pageSize"> & { limit?: number } = {}
+) {
+  const pageSize = typeof filters.limit === "number" ? filters.limit : 60;
+
+  // quitamos `limit` para no pasarlo a getPropertiesPaged
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { limit, ...rest } = filters;
+
+  const res = await getPropertiesPaged({ ...rest, page: 1, pageSize });
   return res.items;
 }
 
