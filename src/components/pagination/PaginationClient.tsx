@@ -28,7 +28,7 @@ export function PaginationClient({
   pageSize: number;
 }) {
   const pathname = usePathname();
-  const sp = useSearchParams();
+  const sp = useSearchParams() as unknown as URLSearchParams;
 
   if (totalPages <= 1) return null;
 
@@ -49,7 +49,8 @@ export function PaginationClient({
 
         <div className="flex items-center gap-2">
           <Link
-            href={buildHref(pathname, sp as any, prev)}
+            scroll={false}
+            href={buildHref(pathname, sp, prev)}
             aria-disabled={page <= 1}
             className={cn(
               "rounded-2xl border px-3 py-2 text-xs font-semibold shadow-sm",
@@ -67,7 +68,8 @@ export function PaginationClient({
           </div>
 
           <Link
-            href={buildHref(pathname, sp as any, next)}
+            scroll={false}
+            href={buildHref(pathname, sp, next)}
             aria-disabled={page >= totalPages}
             className={cn(
               "rounded-2xl border px-3 py-2 text-xs font-semibold shadow-sm",

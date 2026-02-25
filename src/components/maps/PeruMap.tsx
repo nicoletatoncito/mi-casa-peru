@@ -3,7 +3,7 @@
 
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 
 type Pin = {
@@ -29,8 +29,8 @@ const DEFAULT_ZOOM = 5;
 
 function useFixLeafletIcons() {
   useEffect(() => {
-    // @ts-expect-error private
     delete (L.Icon.Default.prototype as any)._getIconUrl;
+
     L.Icon.Default.mergeOptions({
       iconRetinaUrl:
         "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -40,21 +40,22 @@ function useFixLeafletIcons() {
   }, []);
 }
 
-function FitBounds({ pins }: { pins: Pin[] }) {
-  const map = useMap();
-  useEffect(() => {
-    if (pins.length < 2) return;
-    const bounds = L.latLngBounds(pins.map((p) => [p.lat, p.lng] as [number, number])).pad(0.18);
-    map.fitBounds(bounds, { animate: true });
-  }, [map, pins]);
-  return null;
+function escapeHtml(str: string) {
+  return str
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function priceMarkerIcon(priceLabel: string, opts?: { featured?: boolean; verified?: boolean }) {
+function makePriceMarkerIcon(
+  priceLabel: string,
+  opts?: { featured?: boolean; verified?: boolean }
+) {
   const featured = !!opts?.featured;
   const verified = !!opts?.verified;
 
-  // Sobrio y “caro”: pill con borde, sombra suave, no emojis.
   const html = `
     <div class="mcp-pin ${featured ? "mcp-pin--featured" : ""}">
       <div class="mcp-pin__pill">
@@ -74,13 +75,58 @@ function priceMarkerIcon(priceLabel: string, opts?: { featured?: boolean; verifi
   });
 }
 
-function escapeHtml(str: string) {
-  return str
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function useStableIconFactory() {
+  const cacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  return (priceLabel: string, featured?: boolean, verified?: boolean) => {
+    const key = `${priceLabel}|${featured ? 1 : 0}|${verified ? 1 : 0}`;
+    const existing = cacheRef.current.get(key);
+    if (existing) return existing;
+
+    const icon = makePriceMarkerIcon(priceLabel, { featured, verified });
+    cacheRef.current.set(key, icon);
+    return icon;
+  };
+}
+
+function FitBoundsSmart({
+  pins,
+  enabled,
+}: {
+  pins: Pin[];
+  enabled: boolean;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (pins.length < 2) return;
+
+    const bounds = L.latLngBounds(
+      pins.map((p) => [p.lat, p.lng] as [number, number])
+    ).pad(0.18);
+
+    map.fitBounds(bounds, { animate: true });
+  }, [map, pins, enabled]);
+
+  return null;
+}
+
+function TrackUserInteraction({ onInteract }: { onInteract: () => void }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const handler = () => onInteract();
+    map.on("dragstart", handler);
+    map.on("zoomstart", handler);
+
+    return () => {
+      map.off("dragstart", handler);
+      map.off("zoomstart", handler);
+    };
+  }, [map, onInteract]);
+
+  return null;
 }
 
 export function PeruMap({
@@ -89,6 +135,20 @@ export function PeruMap({
   fallbackZoom = DEFAULT_ZOOM,
 }: Props) {
   useFixLeafletIcons();
+  const getIcon = useStableIconFactory();
+
+  // ✅ Si el usuario interactuó, no volvemos a hacer fitBounds
+  const userInteractedRef = useRef(false);
+
+  const pinsSignature = useMemo(() => {
+    // Solo firma por ids para “cambio real” de dataset
+    return pins.map((p) => p.id).join("|");
+  }, [pins]);
+
+  // Si cambia completamente el set (ej. nuevo filtro), permitimos fitBounds otra vez
+  useEffect(() => {
+    userInteractedRef.current = false;
+  }, [pinsSignature]);
 
   const center = useMemo<[number, number]>(() => {
     if (pins.length === 1) return [pins[0].lat, pins[0].lng];
@@ -99,7 +159,6 @@ export function PeruMap({
 
   return (
     <div className="relative">
-      {/* estilos del marker (scoped aquí, sin librerías extra) */}
       <style>{`
         .mcp-divicon { background: transparent; border: none; }
         .mcp-pin { position: relative; transform: translate(-50%, -100%); }
@@ -151,19 +210,22 @@ export function PeruMap({
         scrollWheelZoom
         className="h-[420px] w-full lg:h-[calc(100vh-210px)]"
       >
-        {/* Tiles sobrios tipo “producto real” */}
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
         />
 
-        {pins.length > 1 ? <FitBounds pins={pins} /> : null}
+        <TrackUserInteraction onInteract={() => (userInteractedRef.current = true)} />
+
+        {pins.length > 1 ? (
+          <FitBoundsSmart pins={pins} enabled={!userInteractedRef.current} />
+        ) : null}
 
         {pins.map((p) => (
           <Marker
             key={p.id}
             position={[p.lat, p.lng]}
-            icon={priceMarkerIcon(p.priceLabel, { featured: p.featured, verified: p.verified })}
+            icon={getIcon(p.priceLabel, p.featured, p.verified)}
           >
             <Popup closeButton>
               <div className="min-w-[240px] max-w-[280px]">
@@ -173,6 +235,7 @@ export function PeruMap({
                 <div className="mt-1 text-sm font-semibold text-neutral-900">
                   {p.title}
                 </div>
+
                 {p.subtitle ? (
                   <div className="mt-1 text-xs text-neutral-600">{p.subtitle}</div>
                 ) : null}

@@ -1,5 +1,6 @@
 // src/lib/db/properties.ts
 import { createServerSupabase } from "../supabase";
+import { unstable_cache } from "next/cache";
 
 export type Listing = {
   id: string;
@@ -74,9 +75,6 @@ function buildQuery(
 
   if (q && q.trim().length >= 2) {
     const term = escapeForILike(q.trim());
-
-    // Nota: usamos ILIKE con patrón %term% para múltiples campos.
-    // El escape evita que el usuario meta % o _ y cambie el patrón.
     query = query.or(
       `title.ilike.%${term}%,city.ilike.%${term}%,district.ilike.%${term}%,address.ilike.%${term}%`
     );
@@ -109,8 +107,24 @@ function buildQuery(
   return query;
 }
 
-/** ✅ HOME: últimas publicaciones */
-export async function getLatestListings(limit = 6): Promise<Listing[]> {
+function stableFiltersKey(filters: ListingsFilters) {
+  // key estable para cache (mismo filtro -> misma key)
+  return JSON.stringify({
+    q: filters.q ?? "",
+    operation: filters.operation ?? "",
+    type: filters.type ?? "",
+    minPrice: filters.minPrice ?? "",
+    maxPrice: filters.maxPrice ?? "",
+    beds: filters.beds ?? "",
+    baths: filters.baths ?? "",
+    sort: filters.sort ?? "newest",
+    page: filters.page ?? 1,
+    pageSize: filters.pageSize ?? 12,
+  });
+}
+
+/** ✅ HOME: últimas publicaciones (cached) */
+async function _getLatestListingsUncached(limit: number): Promise<Listing[]> {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("listings")
@@ -127,8 +141,17 @@ export async function getLatestListings(limit = 6): Promise<Listing[]> {
   return (data ?? []) as Listing[];
 }
 
-/** ✅ LISTADO: paginado */
-export async function getPropertiesPaged(
+export async function getLatestListings(limit = 6): Promise<Listing[]> {
+  const fn = unstable_cache(
+    async () => _getLatestListingsUncached(limit),
+    ["mcp:getLatestListings", String(limit)],
+    { revalidate: 120, tags: ["listings:published"] }
+  );
+  return fn();
+}
+
+/** ✅ LISTADO: paginado (cached) */
+async function _getPropertiesPagedUncached(
   filters: ListingsFilters = {}
 ): Promise<PagedResult<Listing>> {
   const supabase = createServerSupabase();
@@ -158,6 +181,20 @@ export async function getPropertiesPaged(
   };
 }
 
+export async function getPropertiesPaged(
+  filters: ListingsFilters = {}
+): Promise<PagedResult<Listing>> {
+  const key = stableFiltersKey(filters);
+
+  const fn = unstable_cache(
+    async () => _getPropertiesPagedUncached(filters),
+    ["mcp:getPropertiesPaged", key],
+    { revalidate: 60, tags: ["listings:published"] }
+  );
+
+  return fn();
+}
+
 /** Compat simple (mantiene limit) */
 export async function getProperties(
   filters: Omit<ListingsFilters, "page" | "pageSize"> & { limit?: number } = {}
@@ -172,8 +209,8 @@ export async function getProperties(
   return res.items;
 }
 
-/** ✅ DETALLE */
-export async function getPropertyById(id: string): Promise<Listing | null> {
+/** ✅ DETALLE (cached con tags CORRECTOS) */
+async function _getPropertyByIdUncached(id: string): Promise<Listing | null> {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("listings")
@@ -187,6 +224,16 @@ export async function getPropertyById(id: string): Promise<Listing | null> {
     return null;
   }
   return (data ?? null) as Listing | null;
+}
+
+export async function getPropertyById(id: string): Promise<Listing | null> {
+  const fn = unstable_cache(
+    async () => _getPropertyByIdUncached(id),
+    ["mcp:getPropertyById", id],
+    { revalidate: 300, tags: ["listings:published", `listing:${id}`] }
+  );
+
+  return fn();
 }
 
 // Alias por si tu código viejo los usa

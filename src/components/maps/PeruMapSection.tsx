@@ -29,20 +29,24 @@ function formatPEN(value?: number | null) {
 
 export function PeruMapSection({ listings }: { listings: Listing[] }) {
   const pins = useMemo(() => {
-    return (listings ?? []).map((p) => ({
-      id: p.id,
-      title: p.title,
-      lat: p.lat,
-      lng: p.lng,
-      priceLabel:
+    return (listings ?? []).map((p) => {
+      const priceLabel =
         p.operation === "alquiler"
           ? `${formatPEN(p.price_pen)}/mes`
-          : formatPEN(p.price_pen),
-      subtitle: [p.district, p.city].filter(Boolean).join(", ") || p.address || "Perú",
-      href: `/propiedades/${p.id}`,
-      featured: p.featured,
-      verified: p.verified,
-    }));
+          : formatPEN(p.price_pen);
+
+      return {
+        id: p.id,
+        title: p.title,
+        lat: p.lat,
+        lng: p.lng,
+        priceLabel,
+        subtitle: [p.district, p.city].filter(Boolean).join(", ") || p.address || "Perú",
+        href: `/propiedades/${p.id}`,
+        featured: p.featured,
+        verified: p.verified,
+      };
+    });
   }, [listings]);
 
   return (

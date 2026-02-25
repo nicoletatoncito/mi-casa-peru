@@ -1,15 +1,22 @@
 // src/app/propiedades/page.tsx
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
+
 import { PeruMapSection } from "@/components/maps/PeruMapSection";
 import { PropertiesFiltersClient } from "@/components/filters/PropertiesFiltersClient";
 import { PaginationClient } from "@/components/pagination/PaginationClient";
+import { SafeImage } from "@/components/ui/SafeImage";
+
 import { getPropertiesPaged } from "@/lib/db/properties";
+import type { Listing } from "@/lib/db/properties";
 
 export const metadata: Metadata = {
   title: "Propiedades | Mi Casa Perú",
   description: "Listado de propiedades con mapa interactivo.",
 };
+
+export const dynamic = "force-dynamic";
 
 function formatPEN(value?: number | null) {
   if (!value) return "Precio a consultar";
@@ -18,6 +25,20 @@ function formatPEN(value?: number | null) {
     currency: "PEN",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function parseNumber(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function normalizeString(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+function clampInt(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
 function Card({
@@ -46,12 +67,10 @@ function Card({
     >
       <div className="relative h-44 w-full bg-neutral-100">
         {image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <SafeImage
             src={image}
             alt={title}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-            loading="lazy"
           />
         ) : (
           <div className="h-full w-full bg-[radial-gradient(1200px_circle_at_10%_10%,rgba(15,23,42,0.18),transparent_40%),radial-gradient(900px_circle_at_90%_30%,rgba(99,102,241,0.18),transparent_40%),linear-gradient(to_bottom,rgba(0,0,0,0.04),rgba(0,0,0,0.02))]" />
@@ -95,53 +114,62 @@ function Card({
         <p className="text-xs text-neutral-600">{meta}</p>
         <div className="mt-3 flex items-center justify-between">
           <span className="text-xs font-semibold text-neutral-900">Ver detalle</span>
-          <span className="text-neutral-400 transition group-hover:translate-x-0.5">→</span>
+          <span className="text-neutral-400 transition group-hover:translate-x-0.5">
+            →
+          </span>
         </div>
       </div>
     </Link>
   );
 }
 
-function parseNumber(v: string | undefined): number | undefined {
-  if (!v) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+function MapShellFallback() {
+  return (
+    <div className="relative h-[420px] w-full lg:h-[calc(100vh-210px)]">
+      <div className="absolute inset-0 animate-pulse bg-neutral-100" />
+      <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white/80 px-3 py-1.5 text-xs text-neutral-700 backdrop-blur">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-neutral-400" />
+        Cargando mapa…
+      </div>
+    </div>
+  );
 }
 
 export default async function PropertiesPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Record<string, string | string[] | undefined>;
 }) {
-  const sp = await searchParams;
+  const sp = searchParams;
 
-  const q = typeof sp.q === "string" ? sp.q : undefined;
+  const q = normalizeString(sp.q);
   const operation =
     sp.operation === "venta" || sp.operation === "alquiler"
       ? (sp.operation as "venta" | "alquiler")
       : undefined;
 
-  const type = typeof sp.type === "string" ? sp.type : undefined;
-  const district = typeof sp.district === "string" ? sp.district : undefined;
+  const type = normalizeString(sp.type);
+  const district = normalizeString(sp.district);
 
-  const minPrice = parseNumber(typeof sp.minPrice === "string" ? sp.minPrice : undefined);
-  const maxPrice = parseNumber(typeof sp.maxPrice === "string" ? sp.maxPrice : undefined);
-  const beds = parseNumber(typeof sp.beds === "string" ? sp.beds : undefined);
-  const baths = parseNumber(typeof sp.baths === "string" ? sp.baths : undefined);
+  const minPrice = parseNumber(normalizeString(sp.minPrice));
+  const maxPrice = parseNumber(normalizeString(sp.maxPrice));
+  const beds = parseNumber(normalizeString(sp.beds));
+  const baths = parseNumber(normalizeString(sp.baths));
 
   const sort =
-    sp.sort === "price_asc" || sp.sort === "price_desc" || sp.sort === "relevance" || sp.sort === "newest"
+    sp.sort === "price_asc" ||
+    sp.sort === "price_desc" ||
+    sp.sort === "relevance" ||
+    sp.sort === "newest"
       ? (sp.sort as any)
       : "newest";
 
-  const page = Math.max(1, parseNumber(typeof sp.page === "string" ? sp.page : undefined) ?? 1);
-  const pageSize = 12; // se siente premium (no muy largo)
+  const page = clampInt(parseNumber(normalizeString(sp.page)) ?? 1, 1, 100000);
+  const pageSize = 12;
 
-  // district lo sumamos a q para no meter otro filtro exacto (mantiene simple)
-  const qFinal = district ? [q, district].filter(Boolean).join(" ") : q;
-
+  // ✅ Importante: NO concatenamos district a q (mantiene filtros limpios)
   const res = await getPropertiesPaged({
-    q: qFinal,
+    q,
     operation,
     type,
     minPrice,
@@ -153,15 +181,21 @@ export default async function PropertiesPage({
     pageSize,
   });
 
-  const listings = res.items;
+  const listings = res.items as Listing[];
 
-  // combos para UI (ideal: se podrían sacar de DB con queries dedicadas, pero esto no rompe nada)
-  const availableTypes = Array.from(new Set(listings.map((l: any) => l.property_type).filter(Boolean))).sort();
-  const availableDistricts = Array.from(new Set(listings.map((l: any) => l.district).filter(Boolean))).sort();
+  const isString = (v: unknown): v is string =>
+    typeof v === "string" && v.trim().length > 0;
+
+  const availableTypes = Array.from(
+    new Set(listings.map((l) => l.property_type).filter(isString))
+  ).sort();
+
+  const availableDistricts = Array.from(
+    new Set(listings.map((l) => l.district).filter(isString))
+  ).sort();
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      {/* Header */}
       <section className="relative overflow-hidden border-b bg-white">
         <div className="absolute inset-0 bg-[radial-gradient(1100px_circle_at_20%_-10%,rgba(99,102,241,0.16),transparent_45%),radial-gradient(900px_circle_at_80%_0%,rgba(15,23,42,0.10),transparent_45%)]" />
         <div className="relative mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
@@ -193,22 +227,9 @@ export default async function PropertiesPage({
         </div>
       </section>
 
-      {/* Layout */}
       <section className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* MAP */}
-          <div className="order-1 lg:order-2 lg:col-span-7">
-            <div className="lg:sticky lg:top-4">
-              <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_14px_45px_-24px_rgba(0,0,0,0.35)]">
-                <PeruMapSection listings={listings as any[]} />
-              </div>
-              <p className="mt-2 text-xs text-neutral-500">
-                Mostrando ubicaciones de esta página.
-              </p>
-            </div>
-          </div>
-
-          {/* LIST + FILTERS */}
+          {/* LIST primero para percepción */}
           <div className="order-2 lg:order-1 lg:col-span-5">
             <div className="space-y-4">
               <PropertiesFiltersClient
@@ -219,15 +240,36 @@ export default async function PropertiesPage({
               <div className="space-y-3">
                 {listings.length === 0 ? (
                   <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-                    <p className="text-sm font-semibold text-neutral-900">
-                      No se encontraron resultados
-                    </p>
-                    <p className="mt-1 text-sm text-neutral-600">
-                      Prueba ajustando filtros o limpiando la búsqueda.
-                    </p>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 grid h-10 w-10 place-items-center rounded-2xl bg-neutral-100 text-neutral-700">
+                        🔎
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-neutral-900">
+                          No hay propiedades que coincidan
+                        </p>
+                        <p className="mt-1 text-sm text-neutral-600">
+                          Ajusta filtros (precio, distrito, tipo) o limpia la búsqueda para ver más opciones.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Link
+                            href="/propiedades"
+                            className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-900 shadow-sm hover:bg-neutral-50"
+                          >
+                            Limpiar filtros
+                          </Link>
+                          <Link
+                            href="/"
+                            className="rounded-xl bg-neutral-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800"
+                          >
+                            Volver al inicio
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ) : (
-                  listings.map((p: any) => {
+                  listings.map((p) => {
                     const subtitle = [p.district, p.city].filter(Boolean).join(", ");
                     const price =
                       p.operation === "alquiler"
@@ -264,6 +306,20 @@ export default async function PropertiesPage({
                 total={res.total}
                 pageSize={res.pageSize}
               />
+            </div>
+          </div>
+
+          {/* MAP no bloquea */}
+          <div className="order-1 lg:order-2 lg:col-span-7">
+            <div className="lg:sticky lg:top-4">
+              <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_14px_45px_-24px_rgba(0,0,0,0.35)]">
+                <Suspense fallback={<MapShellFallback />}>
+                  <PeruMapSection listings={listings} />
+                </Suspense>
+              </div>
+              <p className="mt-2 text-xs text-neutral-500">
+                Mostrando ubicaciones de esta página.
+              </p>
             </div>
           </div>
         </div>
