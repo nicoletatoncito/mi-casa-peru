@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { PeruMapSection } from "@/components/maps/PeruMapSection";
 import { PropertiesFiltersClient } from "@/components/filters/PropertiesFiltersClient";
 import { PaginationClient } from "@/components/pagination/PaginationClient";
-import { SafeImage } from "@/components/ui/SafeImage";
+import SafeImage from "@/components/ui/SafeImage";
 
 import { getPropertiesPaged } from "@/lib/db/properties";
 import type { Listing } from "@/lib/db/properties";
@@ -19,7 +19,8 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 function formatPEN(value?: number | null) {
-  if (!value) return "Precio a consultar";
+  if (value === null || value === undefined) return "Precio a consultar";
+  if (!Number.isFinite(value)) return "Precio a consultar";
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
     currency: "PEN",
@@ -40,6 +41,9 @@ function normalizeString(v: unknown): string | undefined {
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
+
+type Operation = "venta" | "alquiler";
+type Sort = "price_asc" | "price_desc" | "relevance" | "newest";
 
 function Card({
   href,
@@ -70,7 +74,9 @@ function Card({
           <SafeImage
             src={image}
             alt={title}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+            fill
+            sizes="(max-width: 1024px) 100vw, 40vw"
+            className="object-cover transition duration-500 group-hover:scale-[1.03]"
           />
         ) : (
           <div className="h-full w-full bg-[radial-gradient(1200px_circle_at_10%_10%,rgba(15,23,42,0.18),transparent_40%),radial-gradient(900px_circle_at_90%_30%,rgba(99,102,241,0.18),transparent_40%),linear-gradient(to_bottom,rgba(0,0,0,0.04),rgba(0,0,0,0.02))]" />
@@ -102,9 +108,7 @@ function Card({
               </p>
             </div>
             <div className="shrink-0 text-right">
-              <p className="text-sm font-semibold text-white drop-shadow-sm">
-                {price}
-              </p>
+              <p className="text-sm font-semibold text-white drop-shadow-sm">{price}</p>
             </div>
           </div>
         </div>
@@ -114,9 +118,7 @@ function Card({
         <p className="text-xs text-neutral-600">{meta}</p>
         <div className="mt-3 flex items-center justify-between">
           <span className="text-xs font-semibold text-neutral-900">Ver detalle</span>
-          <span className="text-neutral-400 transition group-hover:translate-x-0.5">
-            →
-          </span>
+          <span className="text-neutral-400 transition group-hover:translate-x-0.5">→</span>
         </div>
       </div>
     </Link>
@@ -143,9 +145,10 @@ export default async function PropertiesPage({
   const sp = searchParams;
 
   const q = normalizeString(sp.q);
-  const operation =
+
+  const operation: Operation | undefined =
     sp.operation === "venta" || sp.operation === "alquiler"
-      ? (sp.operation as "venta" | "alquiler")
+      ? (sp.operation as Operation)
       : undefined;
 
   const type = normalizeString(sp.type);
@@ -156,22 +159,22 @@ export default async function PropertiesPage({
   const beds = parseNumber(normalizeString(sp.beds));
   const baths = parseNumber(normalizeString(sp.baths));
 
-  const sort =
+  const sort: Sort =
     sp.sort === "price_asc" ||
     sp.sort === "price_desc" ||
     sp.sort === "relevance" ||
     sp.sort === "newest"
-      ? (sp.sort as any)
+      ? (sp.sort as Sort)
       : "newest";
 
   const page = clampInt(parseNumber(normalizeString(sp.page)) ?? 1, 1, 100000);
   const pageSize = 12;
 
-  // ✅ Importante: NO concatenamos district a q (mantiene filtros limpios)
   const res = await getPropertiesPaged({
     q,
     operation,
     type,
+    district,
     minPrice,
     maxPrice,
     beds,
@@ -181,10 +184,9 @@ export default async function PropertiesPage({
     pageSize,
   });
 
-  const listings = res.items as Listing[];
+  const listings = (res.items ?? []) as Listing[];
 
-  const isString = (v: unknown): v is string =>
-    typeof v === "string" && v.trim().length > 0;
+  const isString = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
 
   const availableTypes = Array.from(
     new Set(listings.map((l) => l.property_type).filter(isString))
@@ -194,6 +196,33 @@ export default async function PropertiesPage({
     new Set(listings.map((l) => l.district).filter(isString))
   ).sort();
 
+  /**
+   * ✅ FIX “senior”:
+   * El mapa debe recibir solo items con lat/lng válidos y con el shape mínimo.
+   * Evita errores de tipos aunque PeruMapSection sea estricto.
+   */
+  const mapListings = listings
+    .filter(
+      (l) =>
+        typeof l.lat === "number" &&
+        Number.isFinite(l.lat) &&
+        typeof l.lng === "number" &&
+        Number.isFinite(l.lng)
+    )
+    .map((l) => ({
+      id: l.id,
+      title: l.title,
+      lat: l.lat as number,
+      lng: l.lng as number,
+      price_pen: l.price_pen ?? null,
+      operation: l.operation,
+      district: l.district ?? null,
+      city: l.city ?? null,
+      image_url: l.image_url ?? null,
+      featured: !!l.featured,
+      verified: !!l.verified,
+    }));
+
   return (
     <main className="min-h-screen bg-neutral-50">
       <section className="relative overflow-hidden border-b bg-white">
@@ -201,9 +230,7 @@ export default async function PropertiesPage({
         <div className="relative mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold tracking-wide text-neutral-500">
-                MI CASA PERÚ
-              </p>
+              <p className="text-xs font-semibold tracking-wide text-neutral-500">MI CASA PERÚ</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
                 Propiedades
               </h1>
@@ -229,7 +256,6 @@ export default async function PropertiesPage({
 
       <section className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* LIST primero para percepción */}
           <div className="order-2 lg:order-1 lg:col-span-5">
             <div className="space-y-4">
               <PropertiesFiltersClient
@@ -249,7 +275,8 @@ export default async function PropertiesPage({
                           No hay propiedades que coincidan
                         </p>
                         <p className="mt-1 text-sm text-neutral-600">
-                          Ajusta filtros (precio, distrito, tipo) o limpia la búsqueda para ver más opciones.
+                          Ajusta filtros (precio, distrito, tipo) o limpia la búsqueda para ver más
+                          opciones.
                         </p>
                         <div className="mt-4 flex flex-wrap gap-2">
                           <Link
@@ -309,12 +336,11 @@ export default async function PropertiesPage({
             </div>
           </div>
 
-          {/* MAP no bloquea */}
           <div className="order-1 lg:order-2 lg:col-span-7">
             <div className="lg:sticky lg:top-4">
               <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_14px_45px_-24px_rgba(0,0,0,0.35)]">
                 <Suspense fallback={<MapShellFallback />}>
-                  <PeruMapSection listings={listings} />
+                  <PeruMapSection listings={mapListings as any} />
                 </Suspense>
               </div>
               <p className="mt-2 text-xs text-neutral-500">

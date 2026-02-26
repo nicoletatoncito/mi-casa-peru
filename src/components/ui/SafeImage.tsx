@@ -1,40 +1,64 @@
-// src/components/ui/SafeImage.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import Image, { type ImageProps } from "next/image";
+import { useEffect, useMemo, useState } from "react";
 
-type Props = {
+type Props = Omit<ImageProps, "src"> & {
   src?: string | null;
-  alt: string;
-  className?: string;
+  fallbackSrc?: string;
 };
 
-const FALLBACK =
-  "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=80";
+function normalizeUrl(u: string) {
+  // 1) trim
+  let url = u.trim();
 
-export function SafeImage({ src, alt, className }: Props) {
-  const [currentSrc, setCurrentSrc] = useState(src || FALLBACK);
+  // 2) arregla "//" después del hostname (https://host//path -> https://host/path)
+  url = url.replace(/^(https?:\/\/[^/]+)\/{2,}/, "$1/");
+
+  // 3) normaliza rutas supabase antiguas
+  url = url
+    .replace(
+      /\.supabase\.co\/v1\/object\/public\//,
+      ".supabase.co/storage/v1/object/public/"
+    )
+    .replace(
+      /\.supabase\.co\/v1\/object\/sign\//,
+      ".supabase.co/storage/v1/object/sign/"
+    );
+
+  return url;
+}
+
+export default function SafeImage({
+  src,
+  alt,
+  fallbackSrc = "/placeholder.jpg",
+  ...props
+}: Props) {
+  const safeSrc = useMemo(() => {
+    const s = (src ?? "").trim();
+    if (!s) return fallbackSrc;
+    if (s.startsWith("http")) return normalizeUrl(s);
+    return s; // rutas locales /public
+  }, [src, fallbackSrc]);
+
+  const [currentSrc, setCurrentSrc] = useState<string>(safeSrc);
 
   useEffect(() => {
-    setCurrentSrc(src || FALLBACK);
-  }, [src]);
+    setCurrentSrc(safeSrc);
+  }, [safeSrc]);
 
-  if (process.env.NODE_ENV === "development") {
-    // eslint-disable-next-line no-console
-    console.log("[SafeImage] src received:", src);
-  }
+  const anyProps: any = props;
+  const hasFill = !!anyProps.fill;
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
+      {...props}
       src={currentSrc}
       alt={alt}
-      className={className}
-      loading="lazy"
-      referrerPolicy="no-referrer"
-      onError={() => {
-        setCurrentSrc(FALLBACK);
-      }}
+      width={hasFill ? undefined : (anyProps.width ?? 1200)}
+      height={hasFill ? undefined : (anyProps.height ?? 800)}
+      onError={() => setCurrentSrc(fallbackSrc)}
     />
   );
 }

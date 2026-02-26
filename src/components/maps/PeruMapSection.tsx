@@ -7,15 +7,15 @@ import { PeruMap } from "./PeruMap";
 type Listing = {
   id: string;
   title: string;
-  price_pen: number | null;
+  price_pen?: number | null;
   operation: "venta" | "alquiler";
-  city: string;
-  district: string | null;
-  address: string | null;
-  lat: number;
-  lng: number;
-  featured: boolean;
-  verified: boolean;
+  city?: string | null;
+  district?: string | null;
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  featured?: boolean | null;
+  verified?: boolean | null;
 };
 
 function formatPEN(value?: number | null) {
@@ -29,24 +29,32 @@ function formatPEN(value?: number | null) {
 
 export function PeruMapSection({ listings }: { listings: Listing[] }) {
   const pins = useMemo(() => {
-    return (listings ?? []).map((p) => {
-      const priceLabel =
-        p.operation === "alquiler"
-          ? `${formatPEN(p.price_pen)}/mes`
-          : formatPEN(p.price_pen);
+    const fallbackLat = -9.19;
+    const fallbackLng = -75.0152;
 
-      return {
-        id: p.id,
-        title: p.title,
-        lat: p.lat,
-        lng: p.lng,
-        priceLabel,
-        subtitle: [p.district, p.city].filter(Boolean).join(", ") || p.address || "Perú",
-        href: `/propiedades/${p.id}`,
-        featured: p.featured,
-        verified: p.verified,
-      };
-    });
+    return (listings ?? [])
+      .filter((p) => p && p.id)
+      .map((p) => {
+        const priceLabel =
+          p.operation === "alquiler"
+            ? `${formatPEN(p.price_pen)}/mes`
+            : formatPEN(p.price_pen);
+
+        const lat = typeof p.lat === "number" ? p.lat : fallbackLat;
+        const lng = typeof p.lng === "number" ? p.lng : fallbackLng;
+
+        return {
+          id: p.id,
+          title: p.title,
+          lat,
+          lng,
+          priceLabel,
+          subtitle: [p.district, p.city].filter(Boolean).join(", ") || p.address || "Perú",
+          href: `/propiedades/${p.id}`,
+          featured: !!p.featured,
+          verified: !!p.verified,
+        };
+      });
   }, [listings]);
 
   return (

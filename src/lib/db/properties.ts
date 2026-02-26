@@ -1,34 +1,190 @@
 // src/lib/db/properties.ts
-import { createServerSupabase } from "../supabase";
-import { unstable_cache } from "next/cache";
+import "server-only";
+import { createServerSupabase } from "@/lib/supabase";
 
-export type Listing = {
+export type ListingStatus = "draft" | "published" | "archived" | string;
+export type Operation = "venta" | "alquiler" | string;
+
+export type Property = {
   id: string;
   title: string;
-  description: string | null;
-  price_pen: number | null;
-  operation: "venta" | "alquiler";
+  description?: string | null;
+
+  status: ListingStatus;
+  operation: Operation;
   property_type: string;
-  beds: number | null;
-  baths: number | null;
-  parking: number | null;
-  area_m2: number | null;
-  city: string;
-  district: string | null;
-  address: string | null;
-  lat: number;
-  lng: number;
-  image_url: string | null;
-  featured: boolean;
-  verified: boolean;
-  status: "published" | "draft" | "archived";
-  created_at: string;
+
+  district?: string | null;
+  city?: string | null;
+  address?: string | null;
+
+  price_pen?: number | null;
+  beds?: number | null;
+  baths?: number | null;
+  parking?: number | null;
+  area_m2?: number | null;
+
+  lat?: number | null;
+  lng?: number | null;
+
+  featured?: boolean | null;
+  verified?: boolean | null;
+
+  image_url?: string | null;
+
+  whatsapp_phone?: string | null;
+
+  created_at?: string | null;
 };
 
-export type ListingsFilters = {
+export type Listing = Property;
+
+const LISTING_SELECT_FULL = `
+  id,
+  title,
+  description,
+  status,
+  operation,
+  property_type,
+  district,
+  city,
+  address,
+  price_pen,
+  beds,
+  baths,
+  parking,
+  area_m2,
+  lat,
+  lng,
+  featured,
+  verified,
+  image_url,
+  whatsapp_phone,
+  created_at
+`;
+
+const LISTING_SELECT_CARD = `
+  id,
+  title,
+  status,
+  operation,
+  property_type,
+  district,
+  city,
+  price_pen,
+  beds,
+  baths,
+  area_m2,
+  lat,
+  lng,
+  featured,
+  verified,
+  image_url,
+  whatsapp_phone,
+  created_at
+`;
+
+function safeInt(n: unknown): number | null {
+  const v = typeof n === "number" ? n : Number(n);
+  return Number.isFinite(v) ? v : null;
+}
+
+function cleanText(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return s ? s : null;
+}
+
+export async function getPropertyById(id: string): Promise<Property | null> {
+  const supabase = createServerSupabase();
+
+  const { data, error } = await supabase
+    .from("listings")
+    .select(LISTING_SELECT_FULL)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) return null;
+  return (data as Property) ?? null;
+}
+
+/** ✅ Solo público: solo devuelve si está published */
+export async function getPropertyByIdPublic(id: string): Promise<Property | null> {
+  const supabase = createServerSupabase();
+
+  const { data, error } = await supabase
+    .from("listings")
+    .select(LISTING_SELECT_FULL)
+    .eq("id", id)
+    .eq("status", "published")
+    .maybeSingle();
+
+  if (error) return null;
+  return (data as Property) ?? null;
+}
+
+export async function getProperties(args: {
   q?: string;
   operation?: "venta" | "alquiler";
   type?: string;
+  district?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  beds?: number;
+  baths?: number;
+  sort?: "newest" | "price_asc" | "price_desc" | "relevance";
+  limit?: number;
+}): Promise<Property[]> {
+  const supabase = createServerSupabase();
+  const limit = Math.max(1, Math.min(args.limit ?? 60, 200));
+
+  let query = supabase
+    .from("listings")
+    .select(LISTING_SELECT_CARD)
+    .eq("status", "published")
+    .limit(limit);
+
+  if (args.operation) query = query.eq("operation", args.operation);
+  if (args.type) query = query.eq("property_type", args.type);
+  if (args.district) query = query.ilike("district", `%${args.district}%`);
+
+  if (typeof args.minPrice === "number") query = query.gte("price_pen", args.minPrice);
+  if (typeof args.maxPrice === "number") query = query.lte("price_pen", args.maxPrice);
+
+  if (typeof args.beds === "number") query = query.gte("beds", args.beds);
+  if (typeof args.baths === "number") query = query.gte("baths", args.baths);
+
+  if (args.q?.trim()) {
+    const q = args.q.trim();
+    query = query.or(
+      `title.ilike.%${q}%,district.ilike.%${q}%,city.ilike.%${q}%,address.ilike.%${q}%`
+    );
+  }
+
+  switch (args.sort) {
+    case "price_asc":
+      query = query.order("price_pen", { ascending: true, nullsFirst: false });
+      break;
+    case "price_desc":
+      query = query.order("price_pen", { ascending: false, nullsFirst: false });
+      break;
+    case "newest":
+    default:
+      query = query.order("created_at", { ascending: false, nullsFirst: false });
+      break;
+  }
+
+  const { data, error } = await query;
+  if (error) return [];
+  return (data as Property[]) ?? [];
+}
+
+/** ✅ Premium: paginación REAL + total + totalPages (para tu UI) */
+export async function getPropertiesPaged(args: {
+  q?: string;
+  operation?: "venta" | "alquiler";
+  type?: string;
+  district?: string;
   minPrice?: number;
   maxPrice?: number;
   beds?: number;
@@ -36,206 +192,69 @@ export type ListingsFilters = {
   sort?: "newest" | "price_asc" | "price_desc" | "relevance";
   page?: number; // 1-based
   pageSize?: number;
-};
-
-export type PagedResult<T> = {
-  items: T[];
-  total: number;
+}): Promise<{
+  items: Property[];
   page: number;
   pageSize: number;
+  total: number;
   totalPages: number;
-};
-
-const SELECT =
-  "id,title,description,price_pen,operation,property_type,beds,baths,parking,area_m2,city,district,address,lat,lng,image_url,featured,verified,status,created_at";
-
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-/**
- * Escapa caracteres especiales para ILIKE:
- * - % y _ son wildcards en SQL LIKE.
- * - \ es el caracter de escape.
- */
-function escapeForILike(input: string) {
-  return input.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
-}
-
-function buildQuery(
-  supabase: ReturnType<typeof createServerSupabase>,
-  filters: ListingsFilters
-) {
-  const { q, operation, type, minPrice, maxPrice, beds, baths, sort = "newest" } = filters;
-
-  let query = supabase
-    .from("listings")
-    .select(SELECT, { count: "exact" })
-    .eq("status", "published");
-
-  if (q && q.trim().length >= 2) {
-    const term = escapeForILike(q.trim());
-    query = query.or(
-      `title.ilike.%${term}%,city.ilike.%${term}%,district.ilike.%${term}%,address.ilike.%${term}%`
-    );
-  }
-
-  if (operation) query = query.eq("operation", operation);
-  if (type && type.trim()) query = query.eq("property_type", type.trim());
-  if (typeof minPrice === "number") query = query.gte("price_pen", minPrice);
-  if (typeof maxPrice === "number") query = query.lte("price_pen", maxPrice);
-  if (typeof beds === "number") query = query.gte("beds", beds);
-  if (typeof baths === "number") query = query.gte("baths", baths);
-
-  // Orden estable: SIEMPRE terminamos con id para evitar saltos por empates
-  if (sort === "price_asc") {
-    query = query.order("price_pen", { ascending: true, nullsFirst: false });
-    query = query.order("created_at", { ascending: false });
-    query = query.order("id", { ascending: true });
-  } else if (sort === "price_desc") {
-    query = query.order("price_pen", { ascending: false, nullsFirst: false });
-    query = query.order("created_at", { ascending: false });
-    query = query.order("id", { ascending: true });
-  } else {
-    // "newest" y "relevance" (por ahora: featured/verified/newest)
-    query = query.order("featured", { ascending: false });
-    query = query.order("verified", { ascending: false });
-    query = query.order("created_at", { ascending: false });
-    query = query.order("id", { ascending: true });
-  }
-
-  return query;
-}
-
-function stableFiltersKey(filters: ListingsFilters) {
-  // key estable para cache (mismo filtro -> misma key)
-  return JSON.stringify({
-    q: filters.q ?? "",
-    operation: filters.operation ?? "",
-    type: filters.type ?? "",
-    minPrice: filters.minPrice ?? "",
-    maxPrice: filters.maxPrice ?? "",
-    beds: filters.beds ?? "",
-    baths: filters.baths ?? "",
-    sort: filters.sort ?? "newest",
-    page: filters.page ?? 1,
-    pageSize: filters.pageSize ?? 12,
-  });
-}
-
-/** ✅ HOME: últimas publicaciones (cached) */
-async function _getLatestListingsUncached(limit: number): Promise<Listing[]> {
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
-    .from("listings")
-    .select(SELECT)
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: true })
-    .limit(limit);
-
-  if (error) {
-    console.error("getLatestListings error:", error);
-    return [];
-  }
-  return (data ?? []) as Listing[];
-}
-
-export async function getLatestListings(limit = 6): Promise<Listing[]> {
-  const fn = unstable_cache(
-    async () => _getLatestListingsUncached(limit),
-    ["mcp:getLatestListings", String(limit)],
-    { revalidate: 120, tags: ["listings:published"] }
-  );
-  return fn();
-}
-
-/** ✅ LISTADO: paginado (cached) */
-async function _getPropertiesPagedUncached(
-  filters: ListingsFilters = {}
-): Promise<PagedResult<Listing>> {
+}> {
   const supabase = createServerSupabase();
 
-  const pageSize = clampInt(filters.pageSize ?? 12, 5, 60);
-  const page = clampInt(filters.page ?? 1, 1, 100000);
+  const pageSize = Math.max(1, Math.min(args.pageSize ?? 24, 80));
+  const page = Math.max(1, args.page ?? 1);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const { data, error, count } = await buildQuery(supabase, filters).range(from, to);
+  let query = supabase
+    .from("listings")
+    .select(LISTING_SELECT_CARD, { count: "exact" })
+    .eq("status", "published");
 
-  if (error) {
-    console.error("getPropertiesPaged error:", error);
-    return { items: [], total: 0, page, pageSize, totalPages: 0 };
+  if (args.operation) query = query.eq("operation", args.operation);
+  if (args.type) query = query.eq("property_type", args.type);
+  if (args.district) query = query.ilike("district", `%${args.district}%`);
+
+  if (typeof args.minPrice === "number") query = query.gte("price_pen", args.minPrice);
+  if (typeof args.maxPrice === "number") query = query.lte("price_pen", args.maxPrice);
+
+  if (typeof args.beds === "number") query = query.gte("beds", args.beds);
+  if (typeof args.baths === "number") query = query.gte("baths", args.baths);
+
+  if (args.q?.trim()) {
+    const q = args.q.trim();
+    query = query.or(
+      `title.ilike.%${q}%,district.ilike.%${q}%,city.ilike.%${q}%,address.ilike.%${q}%`
+    );
   }
 
-  const total = count ?? 0;
-  const totalPages = total ? Math.ceil(total / pageSize) : 0;
+  switch (args.sort) {
+    case "price_asc":
+      query = query.order("price_pen", { ascending: true, nullsFirst: false });
+      break;
+    case "price_desc":
+      query = query.order("price_pen", { ascending: false, nullsFirst: false });
+      break;
+    case "newest":
+    default:
+      query = query.order("created_at", { ascending: false, nullsFirst: false });
+      break;
+  }
+
+  const { data, error, count } = await query.range(from, to);
+
+  if (error) {
+    return { items: [], page, pageSize, total: 0, totalPages: 1 };
+    }
+  const total = safeInt(count) ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return {
-    items: (data ?? []) as Listing[],
-    total,
+    items: (data as Property[]) ?? [],
     page,
     pageSize,
+    total,
     totalPages,
   };
 }
-
-export async function getPropertiesPaged(
-  filters: ListingsFilters = {}
-): Promise<PagedResult<Listing>> {
-  const key = stableFiltersKey(filters);
-
-  const fn = unstable_cache(
-    async () => _getPropertiesPagedUncached(filters),
-    ["mcp:getPropertiesPaged", key],
-    { revalidate: 60, tags: ["listings:published"] }
-  );
-
-  return fn();
-}
-
-/** Compat simple (mantiene limit) */
-export async function getProperties(
-  filters: Omit<ListingsFilters, "page" | "pageSize"> & { limit?: number } = {}
-) {
-  const pageSize = typeof filters.limit === "number" ? filters.limit : 60;
-
-  // quitamos `limit` para no pasarlo a getPropertiesPaged
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { limit, ...rest } = filters;
-
-  const res = await getPropertiesPaged({ ...rest, page: 1, pageSize });
-  return res.items;
-}
-
-/** ✅ DETALLE (cached con tags CORRECTOS) */
-async function _getPropertyByIdUncached(id: string): Promise<Listing | null> {
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
-    .from("listings")
-    .select(SELECT)
-    .eq("id", id)
-    .eq("status", "published")
-    .maybeSingle();
-
-  if (error) {
-    console.error("getPropertyById error:", error);
-    return null;
-  }
-  return (data ?? null) as Listing | null;
-}
-
-export async function getPropertyById(id: string): Promise<Listing | null> {
-  const fn = unstable_cache(
-    async () => _getPropertyByIdUncached(id),
-    ["mcp:getPropertyById", id],
-    { revalidate: 300, tags: ["listings:published", `listing:${id}`] }
-  );
-
-  return fn();
-}
-
-// Alias por si tu código viejo los usa
-export const fetchAllProperties = getProperties;
-export const fetchPropertyById = getPropertyById;

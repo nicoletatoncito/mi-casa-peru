@@ -1,17 +1,17 @@
-// src/app/propiedades/page.tsx
+// src/app/propiedades/[id]/page.tsx
 import type { Metadata } from "next";
 import Link from "next/link";
-import { PeruMapSection } from "@/components/maps/PeruMapSection";
-import { PropertiesFiltersClient } from "@/components/filters/PropertiesFiltersClient";
-import { getProperties } from "@/lib/db/properties";
+import { notFound } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Propiedades | Mi Casa Perú",
-  description: "Listado de propiedades con mapa interactivo.",
+import SafeImage from "@/components/ui/SafeImage";
+import { getPropertyByIdPublic } from "@/lib/db/properties";
+
+type Props = {
+  params: Promise<{ id: string }>;
 };
 
 function formatPEN(value?: number | null) {
-  if (!value) return "Precio a consultar";
+  if (value === null || value === undefined || Number.isNaN(value)) return "Precio a consultar";
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
     currency: "PEN",
@@ -19,247 +19,292 @@ function formatPEN(value?: number | null) {
   }).format(value);
 }
 
-function Card({
-  href,
-  image,
-  title,
-  subtitle,
-  price,
-  meta,
-  featured,
-  verified,
-}: {
-  href: string;
-  image?: string | null;
-  title: string;
-  subtitle: string;
-  price: string;
-  meta: string;
-  featured?: boolean;
-  verified?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group block overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition hover:-translate-y-[1px] hover:shadow-md"
-    >
-      <div className="relative h-44 w-full bg-neutral-100">
-        {image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={image}
-            alt={title}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-            loading="lazy"
-          />
-        ) : (
-          <div className="h-full w-full bg-[radial-gradient(1200px_circle_at_10%_10%,rgba(15,23,42,0.18),transparent_40%),radial-gradient(900px_circle_at_90%_30%,rgba(99,102,241,0.18),transparent_40%),linear-gradient(to_bottom,rgba(0,0,0,0.04),rgba(0,0,0,0.02))]" />
-        )}
-
-        <div className="absolute left-3 top-3 flex items-center gap-2">
-          {featured ? (
-            <span className="inline-flex items-center rounded-full border border-white/15 bg-black/45 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">
-              DESTACADO
-            </span>
-          ) : null}
-          {verified ? (
-            <span className="inline-flex items-center rounded-full border border-white/15 bg-black/45 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur">
-              VERIFICADO
-            </span>
-          ) : null}
-        </div>
-
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/35 to-transparent" />
-
-        <div className="absolute bottom-3 left-3 right-3">
-          <div className="flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-white drop-shadow-sm">
-                {title}
-              </h3>
-              <p className="mt-0.5 line-clamp-1 text-xs text-white/90 drop-shadow-sm">
-                {subtitle}
-              </p>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="text-sm font-semibold text-white drop-shadow-sm">
-                {price}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-4">
-        <p className="text-xs text-neutral-600">{meta}</p>
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-xs font-semibold text-neutral-900">Ver detalle</span>
-          <span className="text-neutral-400 transition group-hover:translate-x-0.5">→</span>
-        </div>
-      </div>
-    </Link>
-  );
+function normalizePhoneDigits(phone?: string | null) {
+  const digits = (phone ?? "").replace(/[^\d]/g, "");
+  return digits.length >= 9 ? digits : "";
 }
 
-function parseNumber(v: string | undefined): number | undefined {
-  if (!v) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+function buildWhatsAppHref(phoneDigits: string, text: string) {
+  const normalized = phoneDigits.replace(/[^\d]/g, "");
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(text)}`;
 }
 
-export default async function PropertiesPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const property = await getPropertyByIdPublic(id);
 
-  const q = typeof sp.q === "string" ? sp.q : undefined;
-  const operation =
-    sp.operation === "venta" || sp.operation === "alquiler"
-      ? (sp.operation as "venta" | "alquiler")
-      : undefined;
+  if (!property) {
+    return {
+      title: "Propiedad no encontrada | Mi Casa Perú",
+      description: "La propiedad solicitada no existe o fue removida.",
+      robots: { index: false, follow: false },
+    };
+  }
 
-  const type = typeof sp.type === "string" ? sp.type : undefined;
-  const district = typeof sp.district === "string" ? sp.district : undefined;
+  const title = `${property.title} | Mi Casa Perú`;
+  const description =
+    property.description?.trim().slice(0, 160) || "Propiedad disponible en Mi Casa Perú.";
 
-  const minPrice = parseNumber(typeof sp.minPrice === "string" ? sp.minPrice : undefined);
-  const maxPrice = parseNumber(typeof sp.maxPrice === "string" ? sp.maxPrice : undefined);
-  const beds = parseNumber(typeof sp.beds === "string" ? sp.beds : undefined);
-  const baths = parseNumber(typeof sp.baths === "string" ? sp.baths : undefined);
+  const images = property.image_url ? [property.image_url] : [];
 
-  const sort =
-    sp.sort === "price_asc" || sp.sort === "price_desc" || sp.sort === "relevance" || sp.sort === "newest"
-      ? (sp.sort as any)
-      : "newest";
+  return {
+    title,
+    description,
+    alternates: { canonical: `/propiedades/${property.id}` },
+    openGraph: {
+      type: "article",
+      title,
+      description,
+      url: `/propiedades/${property.id}`,
+      images,
+    },
+    twitter: {
+      card: images.length ? "summary_large_image" : "summary",
+      title,
+      description,
+      images,
+    },
+  };
+}
 
-  // Ojo: district lo aplicamos en servidor vía búsqueda OR (q) o filtro exacto aquí:
-  // Para filtro exacto sin romper, lo metemos dentro de q si existe o lo pasamos como q adicional.
-  const qFinal = district ? [q, district].filter(Boolean).join(" ") : q;
+export default async function PropertyDetailPage({ params }: Props) {
+  const { id } = await params;
+  const property = await getPropertyByIdPublic(id);
+  if (!property) return notFound();
 
-  const listings = await getProperties({
-    q: qFinal,
-    operation,
-    type,
-    minPrice,
-    maxPrice,
-    beds,
-    baths,
-    sort,
-    limit: 80,
-  });
+  const subtitle = [property.district, property.city].filter(Boolean).join(", ");
+  const price =
+    property.operation === "alquiler"
+      ? `${formatPEN(property.price_pen)}/mes`
+      : formatPEN(property.price_pen);
 
-  // Para combos en UI (pro: solo valores existentes)
-  const availableTypes = Array.from(
-    new Set(listings.map((l: any) => l.property_type).filter(Boolean))
-  ).sort();
+  const whatsappDigits = normalizePhoneDigits(property.whatsapp_phone);
+  const whatsappText = `Hola! Quiero información de: ${property.title} (ID: ${property.id})`;
+  const whatsappHref = whatsappDigits ? buildWhatsAppHref(whatsappDigits, whatsappText) : "";
 
-  const availableDistricts = Array.from(
-    new Set(listings.map((l: any) => l.district).filter(Boolean))
-  ).sort();
+  const metaBadges = [
+    property.property_type,
+    typeof property.beds === "number" ? `${property.beds} dorm.` : null,
+    typeof property.baths === "number" ? `${property.baths} baños` : null,
+    typeof property.parking === "number" ? `${property.parking} estac.` : null,
+    typeof property.area_m2 === "number" ? `${property.area_m2} m²` : null,
+  ].filter(Boolean);
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      {/* Header */}
-      <section className="relative overflow-hidden border-b bg-white">
-        <div className="absolute inset-0 bg-[radial-gradient(1100px_circle_at_20%_-10%,rgba(99,102,241,0.16),transparent_45%),radial-gradient(900px_circle_at_80%_0%,rgba(15,23,42,0.10),transparent_45%)]" />
-        <div className="relative mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-wide text-neutral-500">
-                MI CASA PERÚ
-              </p>
+      <section className="border-b bg-white">
+        <div className="mx-auto max-w-6xl px-4 py-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold tracking-wide text-neutral-500">MI CASA PERÚ</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-                Propiedades
+                {property.title}
               </h1>
               <p className="mt-1 text-sm text-neutral-600">
-                Busca y filtra, con URL compartible.
+                {subtitle || "Perú"} • {property.operation} • {property.property_type}
               </p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {property.featured ? (
+                  <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-[11px] font-semibold text-neutral-700">
+                    DESTACADO
+                  </span>
+                ) : null}
+                {property.verified ? (
+                  <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-[11px] font-semibold text-neutral-700">
+                    VERIFICADO
+                  </span>
+                ) : null}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 shadow-sm">
-                {listings.length} resultados
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/"
-                className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 shadow-sm hover:bg-neutral-50"
+                href="/propiedades"
+                className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-900 shadow-sm hover:bg-neutral-50"
               >
-                Inicio
+                ← Volver
               </Link>
+
+              {whatsappDigits ? (
+                <a
+                  href={whatsappHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-full bg-green-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-green-700"
+                >
+                  WhatsApp
+                </a>
+              ) : null}
             </div>
           </div>
         </div>
       </section>
 
-      {/* Layout */}
-      <section className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* MAP */}
-          <div className="order-1 lg:order-2 lg:col-span-7">
-            <div className="lg:sticky lg:top-4">
-              <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_14px_45px_-24px_rgba(0,0,0,0.35)]">
-                <PeruMapSection listings={listings as any[]} />
-              </div>
-              <p className="mt-2 text-xs text-neutral-500">
-                Consejo: selecciona un pin para abrir el detalle.
-              </p>
-            </div>
-          </div>
+      <section className="mx-auto max-w-6xl px-4 py-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-7">
+            <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+              <div className="relative h-[360px] w-full bg-neutral-100">
+                {property.image_url ? (
+                  <SafeImage
+                    src={property.image_url}
+                    alt={property.title}
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 60vw"
+                    className="object-cover"
+                    priority
+                  />
+                ) : (
+                  <div className="h-full w-full bg-[radial-gradient(1200px_circle_at_10%_10%,rgba(15,23,42,0.18),transparent_40%),radial-gradient(900px_circle_at_90%_30%,rgba(99,102,241,0.18),transparent_40%),linear-gradient(to_bottom,rgba(0,0,0,0.04),rgba(0,0,0,0.02))]" />
+                )}
 
-          {/* LIST + FILTERS */}
-          <div className="order-2 lg:order-1 lg:col-span-5">
-            <div className="space-y-4">
-              <PropertiesFiltersClient
-                availableTypes={availableTypes}
-                availableDistricts={availableDistricts}
-              />
+                <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/45 to-transparent" />
 
-              <div className="space-y-3">
-                {listings.length === 0 ? (
-                  <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
-                    <p className="text-sm font-semibold text-neutral-900">
-                      No se encontraron resultados
+                <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white drop-shadow-sm">
+                      {property.title}
                     </p>
-                    <p className="mt-1 text-sm text-neutral-600">
-                      Prueba ajustando filtros o limpiando la búsqueda.
+                    <p className="mt-0.5 line-clamp-1 text-xs text-white/90 drop-shadow-sm">
+                      {subtitle || "Perú"}
                     </p>
                   </div>
-                ) : (
-                  listings.map((p: any) => {
-                    const subtitle = [p.district, p.city].filter(Boolean).join(", ");
-                    const price =
-                      p.operation === "alquiler"
-                        ? `${formatPEN(p.price_pen)}/mes`
-                        : formatPEN(p.price_pen);
+                  <p className="shrink-0 text-right text-base font-semibold text-white drop-shadow-sm">
+                    {price}
+                  </p>
+                </div>
+              </div>
 
-                    const metaParts = [
-                      p.property_type,
-                      typeof p.beds === "number" ? `${p.beds} dorm.` : null,
-                      typeof p.baths === "number" ? `${p.baths} baños` : null,
-                      typeof p.area_m2 === "number" ? `${p.area_m2} m²` : null,
-                    ].filter(Boolean);
+              <div className="p-6">
+                <div className="flex flex-wrap gap-2">
+                  {metaBadges.map((b) => (
+                    <span
+                      key={String(b)}
+                      className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700"
+                    >
+                      {b}
+                    </span>
+                  ))}
+                </div>
 
-                    return (
-                      <Card
-                        key={p.id}
-                        href={`/propiedades/${p.id}`}
-                        image={p.image_url}
-                        title={p.title}
-                        subtitle={subtitle || "Perú"}
-                        price={price}
-                        meta={metaParts.join(" • ")}
-                        featured={!!p.featured}
-                        verified={!!p.verified}
-                      />
-                    );
-                  })
-                )}
+                {property.address ? (
+                  <p className="mt-4 text-sm text-neutral-700">
+                    <span className="font-semibold">Dirección:</span> {property.address}
+                  </p>
+                ) : null}
+
+                {property.description ? (
+                  <div className="mt-4">
+                    <p className="text-sm font-semibold text-neutral-900">Descripción</p>
+                    <p className="mt-1 whitespace-pre-line text-sm text-neutral-700">
+                      {property.description}
+                    </p>
+                  </div>
+                ) : null}
+
+                {typeof property.lat === "number" && typeof property.lng === "number" ? (
+                  <div className="mt-6 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                    <p className="text-xs font-semibold text-neutral-900">Ubicación</p>
+                    <p className="mt-1 text-xs text-neutral-600">
+                      Coordenadas: {property.lat}, {property.lng}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-5">
+            <div className="lg:sticky lg:top-4">
+              <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+                <h2 className="text-lg font-semibold text-neutral-900">Solicitar información</h2>
+                <p className="mt-1 text-sm text-neutral-600">Déjanos tus datos y te contactaremos.</p>
+
+                <form className="mt-4 space-y-3" action="/api/leads" method="post">
+                  <input type="hidden" name="listing_id" value={property.id} />
+
+                  <div>
+                    <label className="text-xs font-semibold text-neutral-700">Nombre</label>
+                    <input
+                      name="name"
+                      required
+                      className="mt-1 w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+                      placeholder="Tu nombre"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-neutral-700">
+                      Teléfono (opcional)
+                    </label>
+                    <input
+                      name="phone"
+                      className="mt-1 w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+                      placeholder="Ej: 999 999 999"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-neutral-700">
+                      Mensaje (opcional)
+                    </label>
+                    <textarea
+                      name="message"
+                      className="mt-1 min-h-[120px] w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+                      placeholder="Hola, quiero más info sobre esta propiedad..."
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-neutral-800"
+                  >
+                    Enviar
+                  </button>
+
+                  {whatsappDigits ? (
+                    <a
+                      href={whatsappHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block w-full rounded-2xl border border-neutral-200 bg-white px-4 py-2 text-center text-sm font-semibold text-neutral-900 shadow-sm hover:bg-neutral-50"
+                    >
+                      Contactar por WhatsApp
+                    </a>
+                  ) : (
+                    <p className="text-xs text-neutral-500">
+                      El dueño aún no configuró WhatsApp para esta propiedad.
+                    </p>
+                  )}
+                </form>
+
+                <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+                  <p className="text-xs font-semibold text-neutral-900">Precio</p>
+                  <p className="mt-1 text-xl font-semibold text-neutral-900">{price}</p>
+                  <p className="mt-1 text-xs text-neutral-600">
+                    Operación:{" "}
+                    <span className="font-semibold text-neutral-800">{property.operation}</span>
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
+
+      {whatsappDigits ? (
+        <a
+          href={whatsappHref}
+          target="_blank"
+          rel="noreferrer"
+          className="fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 rounded-full bg-green-600 px-4 py-3 text-sm font-semibold text-white shadow-lg hover:bg-green-700 lg:hidden"
+          aria-label="Contactar por WhatsApp"
+        >
+          <span className="text-base">💬</span>
+          WhatsApp
+        </a>
+      ) : null}
     </main>
   );
 }

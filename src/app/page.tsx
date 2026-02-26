@@ -1,9 +1,9 @@
 // src/app/page.tsx
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getProperties } from "@/lib/db/properties";
-import { SafeImage } from "@/components/ui/SafeImage";
-
-export const revalidate = 60;
+import SafeImage from "@/components/ui/SafeImage";
 
 function formatPEN(value?: number | null) {
   if (typeof value !== "number") return "Precio a consultar";
@@ -250,7 +250,8 @@ export default async function HomePage() {
               Aún no hay publicaciones
             </p>
             <p className="mt-1 text-sm text-neutral-600">
-              Crea al menos una propiedad en Supabase con <code>status=published</code>.
+              Crea al menos una propiedad en Supabase con{" "}
+              <code>status=published</code>.
             </p>
           </div>
         )}

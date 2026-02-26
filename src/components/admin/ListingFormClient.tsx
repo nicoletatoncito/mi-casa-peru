@@ -1,8 +1,9 @@
 // src/components/admin/ListingFormClient.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
 type ListingStatus = "published" | "draft" | "archived";
 type Operation = "venta" | "alquiler";
@@ -23,6 +24,10 @@ export type AdminListingForm = {
   lat: string;
   lng: string;
   image_url: string;
+
+  // ✅ nuevo
+  whatsapp_phone: string;
+
   featured: boolean;
   verified: boolean;
   status: ListingStatus;
@@ -44,6 +49,10 @@ const empty: AdminListingForm = {
   lat: "",
   lng: "",
   image_url: "",
+
+  // ✅ nuevo
+  whatsapp_phone: "",
+
   featured: false,
   verified: false,
   status: "draft",
@@ -51,6 +60,10 @@ const empty: AdminListingForm = {
 
 function toPayload(f: AdminListingForm) {
   const numOrNull = (v: string) => (v.trim() ? Number(v) : null);
+
+  const phoneDigits = f.whatsapp_phone.trim()
+    ? f.whatsapp_phone.trim().replace(/[^\d]/g, "")
+    : null;
 
   return {
     title: f.title,
@@ -68,10 +81,25 @@ function toPayload(f: AdminListingForm) {
     lat: Number(f.lat),
     lng: Number(f.lng),
     image_url: f.image_url.trim() ? f.image_url : null,
+
+    // ✅ nuevo
+    whatsapp_phone: phoneDigits,
+
     featured: f.featured,
     verified: f.verified,
     status: f.status,
   };
+}
+
+/** ✅ Supabase client (browser) */
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+function safeExt(file: File) {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  return ["jpg", "jpeg", "png", "webp", "avif"].includes(ext) ? ext : "jpg";
 }
 
 export function ListingFormClient({
@@ -89,8 +117,42 @@ export function ListingFormClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ uploader state
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
   function set<K extends keyof AdminListingForm>(k: K, v: AdminListingForm[K]) {
     setForm((prev) => ({ ...prev, [k]: v }));
+  }
+
+  async function uploadCoverImage(file: File) {
+    setImageError(null);
+    setUploadingImage(true);
+
+    try {
+      const bucket = "listing-images";
+      const ext = safeExt(file);
+      const filePath = `${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+
+      const { error: upErr } = await supabase.storage.from(bucket).upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || undefined,
+      });
+
+      if (upErr) throw upErr;
+
+      const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      // ✅ guarda URL en el form automáticamente
+      set("image_url", publicUrl);
+    } catch (e: any) {
+      setImageError(e?.message ?? "Error subiendo imagen");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -101,11 +163,7 @@ export function ListingFormClient({
     try {
       const payload = toPayload(form);
 
-      const url =
-        mode === "create"
-          ? "/api/admin/listings"
-          : `/api/admin/listings/${id}`;
-
+      const url = mode === "create" ? "/api/admin/listings" : `/api/admin/listings/${id}`;
       const method = mode === "create" ? "POST" : "PATCH";
 
       const res = await fetch(url, {
@@ -266,14 +324,103 @@ export function ListingFormClient({
           />
         </div>
 
+        {/* ✅ NUEVO: uploader real a Supabase Storage */}
         <div className="sm:col-span-2">
-          <label className="text-xs font-semibold text-neutral-700">Imagen (URL)</label>
+          <label className="text-xs font-semibold text-neutral-700">Imagen</label>
+
+          <div className="mt-1 rounded-2xl border border-neutral-200 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-neutral-600">
+                {form.image_url ? (
+                  <span className="font-semibold text-neutral-900">Imagen cargada</span>
+                ) : (
+                  <span>Sube una imagen (jpg/png/webp/avif)</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingImage}
+                  className="rounded-xl bg-neutral-900 px-3 py-2 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-60"
+                >
+                  {uploadingImage ? "Subiendo..." : "Subir"}
+                </button>
+
+                {form.image_url ? (
+                  <button
+                    type="button"
+                    onClick={() => set("image_url", "")}
+                    className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-900 hover:bg-neutral-50"
+                  >
+                    Quitar
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div
+              className="mt-3 grid h-28 place-items-center rounded-xl border border-dashed border-neutral-200 bg-neutral-50 text-xs text-neutral-600"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) void uploadCoverImage(f);
+              }}
+            >
+              Arrastra y suelta aquí
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadCoverImage(f);
+              }}
+            />
+
+            {form.image_url ? (
+              <div className="mt-3 overflow-hidden rounded-xl border border-neutral-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={form.image_url} alt="preview" className="h-44 w-full object-cover" />
+              </div>
+            ) : null}
+
+            {imageError ? <p className="mt-2 text-xs text-red-600">{imageError}</p> : null}
+
+            {/* Mantengo input URL como fallback (opcional) */}
+            <div className="mt-3">
+              <label className="text-[11px] font-semibold text-neutral-600">
+                URL (opcional)
+              </label>
+              <input
+                value={form.image_url}
+                onChange={(e) => set("image_url", e.target.value)}
+                className="mt-1 w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
+                placeholder="https://..."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ✅ NUEVO: WhatsApp por propiedad */}
+        <div className="sm:col-span-2">
+          <label className="text-xs font-semibold text-neutral-700">
+            WhatsApp del dueño (solo dígitos, ej: 51939226632)
+          </label>
           <input
-            value={form.image_url}
-            onChange={(e) => set("image_url", e.target.value)}
+            value={form.whatsapp_phone}
+            onChange={(e) => set("whatsapp_phone", e.target.value)}
             className="mt-1 w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-neutral-400"
-            placeholder="https://..."
+            placeholder="51939226632"
           />
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Consejo: guarda con país incluido (51 + número).
+          </p>
         </div>
 
         <div>

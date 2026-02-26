@@ -4,7 +4,7 @@ import { createServerSupabaseAdmin } from "@/lib/supabase";
 import type { Listing } from "@/lib/db/properties";
 
 const SELECT =
-  "id,title,description,price_pen,operation,property_type,beds,baths,parking,area_m2,city,district,address,lat,lng,image_url,featured,verified,status,created_at";
+  "id,title,description,price_pen,operation,property_type,beds,baths,parking,area_m2,city,district,address,lat,lng,image_url,whatsapp_phone,featured,verified,status,created_at";
 
 export type AdminListingInput = {
   title: string;
@@ -22,6 +22,10 @@ export type AdminListingInput = {
   lat: number;
   lng: number;
   image_url?: string | null;
+
+  // ✅ WhatsApp por propiedad
+  whatsapp_phone?: string | null;
+
   featured?: boolean;
   verified?: boolean;
   status: "published" | "draft" | "archived";
@@ -31,6 +35,21 @@ function normalizeText(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t ? t : null;
+}
+
+function normalizePhone(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const raw = v.trim();
+  if (!raw) return null;
+
+  // deja solo dígitos
+  const digits = raw.replace(/[^\d]/g, "");
+
+  // Ej: Perú 51 + 9 dígitos = 11
+  // Permitimos 8..15 para no romper con otros países
+  if (digits.length < 8 || digits.length > 15) return null;
+
+  return digits;
 }
 
 function toNumberOrNull(v: unknown): number | null {
@@ -43,10 +62,11 @@ function toBool(v: unknown): boolean {
   return v === true || v === "true" || v === 1 || v === "1";
 }
 
-export function validateAdminListingInput(payload: any): {
-  ok: true;
-  value: AdminListingInput;
-} | { ok: false; error: string } {
+export function validateAdminListingInput(
+  payload: any
+):
+  | { ok: true; value: AdminListingInput }
+  | { ok: false; error: string } {
   const title = normalizeText(payload?.title);
   const operation = payload?.operation;
   const property_type = normalizeText(payload?.property_type);
@@ -83,6 +103,10 @@ export function validateAdminListingInput(payload: any): {
     lat,
     lng,
     image_url: normalizeText(payload?.image_url),
+
+    // ✅ nuevo
+    whatsapp_phone: normalizePhone(payload?.whatsapp_phone),
+
     featured: toBool(payload?.featured),
     verified: toBool(payload?.verified),
   };
@@ -103,6 +127,22 @@ export async function adminListListings(): Promise<Listing[]> {
     return [];
   }
   return (data ?? []) as Listing[];
+}
+
+export async function adminGetListingById(id: string): Promise<Listing | null> {
+  const supabase = createServerSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("listings")
+    .select(SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("adminGetListingById error:", error);
+    return null;
+  }
+
+  return (data as Listing | null) ?? null;
 }
 
 export async function adminCreateListing(input: AdminListingInput) {
