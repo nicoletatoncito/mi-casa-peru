@@ -7,7 +7,7 @@ export async function POST(
   try {
     const { imageId } = params;
 
-    // ...tu lógica actual...
+    // tu lógica actual aquí...
 
     return NextResponse.json({ ok: true, imageId });
   } catch (err) {
