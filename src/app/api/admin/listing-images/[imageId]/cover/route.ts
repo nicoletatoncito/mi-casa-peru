@@ -1,15 +1,24 @@
 import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/auth";
+import { adminSetCoverImage } from "@/lib/db/adminListingImages";
 
 export async function POST(
-  req: Request,
-  { params }: { params: { imageId: string } }
+  _req: Request,
+  { params }: { params: Promise<{ imageId: string }> }
 ) {
   try {
-    const { imageId } = params;
+    await requireAdminSession();
 
-    // tu lógica actual aquí...
+    const { imageId } = await params;
 
-    return NextResponse.json({ ok: true, imageId });
+    const result = await adminSetCoverImage(imageId, "listing-images");
+
+    return NextResponse.json({
+      ok: true,
+      imageId,
+      listing_id: result.listing_id,
+      cover_url: result.cover_url,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
