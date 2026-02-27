@@ -1,4 +1,3 @@
-// src/app/api/admin/listings/[id]/images/route.ts
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireAdminApi } from "@/lib/auth";
@@ -22,13 +21,18 @@ function safeExt(name: string) {
   return ["jpg", "jpeg", "png", "webp", "avif"].includes(ext) ? ext : "jpg";
 }
 
-export async function GET(_: Request, ctx: { params: { id: string } }) {
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function GET(_req: Request, { params }: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: auth.status }
+    );
   }
 
-  const listingId = ctx.params.id;
+  const { id: listingId } = await params;
 
   try {
     const images = await adminListListingImages(listingId);
@@ -39,18 +43,22 @@ export async function GET(_: Request, ctx: { params: { id: string } }) {
   }
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: Request, { params }: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: auth.status }
+    );
   }
 
-  const listingId = ctx.params.id;
+  const { id: listingId } = await params;
 
   try {
     const form = await req.formData();
     const files = form.getAll("files") as File[];
-    const setCover = (String(form.get("setCover") ?? "false")).toLowerCase() === "true";
+    const setCover =
+      String(form.get("setCover") ?? "false").toLowerCase() === "true";
 
     if (!files || files.length === 0) {
       return NextResponse.json({ ok: false, error: "No files" }, { status: 400 });
@@ -69,7 +77,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
       const bytes = new Uint8Array(arrayBuffer);
 
       const ext = safeExt(f.name);
-      const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+      const fileName = `${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}.${ext}`;
       const path = `listings/${listingId}/${fileName}`;
 
       const { error: upErr } = await supabase.storage.from(bucket).upload(path, bytes, {
@@ -93,18 +103,25 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   }
 }
 
-export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: auth.status }
+    );
   }
 
-  const listingId = ctx.params.id;
+  const { id: listingId } = await params;
+
   const url = new URL(req.url);
   const imageId = url.searchParams.get("imageId");
 
   if (!imageId) {
-    return NextResponse.json({ ok: false, error: "Missing imageId" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Missing imageId" },
+      { status: 400 }
+    );
   }
 
   try {
@@ -117,19 +134,27 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   }
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: Ctx) {
   const auth = await requireAdminApi();
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: auth.status }
+    );
   }
 
-  const listingId = ctx.params.id;
+  const { id: listingId } = await params;
 
   const body = await req.json().catch(() => null);
-  const orderedIds = Array.isArray(body?.orderedIds) ? (body.orderedIds as string[]) : [];
+  const orderedIds = Array.isArray(body?.orderedIds)
+    ? (body.orderedIds as string[])
+    : [];
 
   if (orderedIds.length === 0) {
-    return NextResponse.json({ ok: false, error: "orderedIds required" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "orderedIds required" },
+      { status: 400 }
+    );
   }
 
   try {
