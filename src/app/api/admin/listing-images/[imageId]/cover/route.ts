@@ -7,15 +7,11 @@ export async function POST(
   try {
     const { imageId } = params;
 
-    // ✅ Aquí va tu lógica real (lo que ya tenías):
-    // - validar admin session
-    // - marcar esta imagen como cover
-    // - actualizar DB / storage / etc.
+    // TODO: aquí va tu lógica real para setear el cover
 
     return NextResponse.json({ ok: true, imageId });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Error desconocido en cover route";
+    const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
