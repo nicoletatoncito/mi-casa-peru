@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
+import HomeHeroSearch from "@/components/hero/HomeHeroSearch";
 import { getProperties } from "@/lib/db/properties";
 import SafeImage from "@/components/ui/SafeImage";
 
@@ -34,7 +35,10 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen bg-neutral-50">
-      {/* HERO */}
+      {/* ✅ HERO tipo Adondevivir (client) */}
+      <HomeHeroSearch />
+
+      {/* ✅ TU HOME actual (no se quita nada) */}
       <section className="relative overflow-hidden border-b bg-white">
         <div className="absolute inset-0 bg-[radial-gradient(1100px_circle_at_20%_-10%,rgba(99,102,241,0.14),transparent_45%),radial-gradient(900px_circle_at_80%_0%,rgba(15,23,42,0.08),transparent_45%)]" />
 
@@ -251,7 +255,7 @@ export default async function HomePage() {
             </p>
             <p className="mt-1 text-sm text-neutral-600">
               Crea al menos una propiedad en Supabase con{" "}
-              <code>status=published</code>.
+              <code className="rounded bg-neutral-100 px-1.5 py-0.5">status=published</code>.
             </p>
           </div>
         )}

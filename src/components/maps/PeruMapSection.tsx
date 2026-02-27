@@ -4,7 +4,7 @@
 import { useMemo } from "react";
 import { PeruMap } from "./PeruMap";
 
-type Listing = {
+export type Listing = {
   id: string;
   title: string;
   price_pen?: number | null;
@@ -19,7 +19,7 @@ type Listing = {
 };
 
 function formatPEN(value?: number | null) {
-  if (!value) return "Precio a consultar";
+  if (typeof value !== "number") return "Precio a consultar";
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
     currency: "PEN",
@@ -27,12 +27,24 @@ function formatPEN(value?: number | null) {
   }).format(value);
 }
 
-export function PeruMapSection({ listings }: { listings: Listing[] }) {
+/**
+ * ✅ Compat: acepta `items` (como lo usas en /propiedades)
+ * y también `listings` (por si lo usas en otras partes).
+ */
+export function PeruMapSection({
+  items,
+  listings,
+}: {
+  items?: Listing[];
+  listings?: Listing[];
+}) {
+  const data = (items ?? listings ?? []) as Listing[];
+
   const pins = useMemo(() => {
     const fallbackLat = -9.19;
     const fallbackLng = -75.0152;
 
-    return (listings ?? [])
+    return (data ?? [])
       .filter((p) => p && p.id)
       .map((p) => {
         const priceLabel =
@@ -49,13 +61,16 @@ export function PeruMapSection({ listings }: { listings: Listing[] }) {
           lat,
           lng,
           priceLabel,
-          subtitle: [p.district, p.city].filter(Boolean).join(", ") || p.address || "Perú",
+          subtitle:
+            [p.district, p.city].filter(Boolean).join(", ") ||
+            p.address ||
+            "Perú",
           href: `/propiedades/${p.id}`,
           featured: !!p.featured,
           verified: !!p.verified,
         };
       });
-  }, [listings]);
+  }, [data]);
 
   return (
     <div className="relative">

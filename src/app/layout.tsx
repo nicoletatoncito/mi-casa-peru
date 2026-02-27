@@ -26,7 +26,8 @@ export default function RootLayout({
     <html lang="es">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Header />
-        {children}
+        {/* ✅ espacio para header fixed */}
+        <div className="pt-16">{children}</div>
       </body>
     </html>
   );

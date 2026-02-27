@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createBrowserSupabase } from "@/lib/supabase";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type LoginFormState = {
   email: string;
@@ -28,37 +28,15 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const supabase = createBrowserSupabase();
+      const supabase = createSupabaseBrowser();
 
-      const { data: signInData, error: signInError } =
-        await supabase.auth.signInWithPassword({
-          email: form.email.trim(),
-          password: form.password,
-        });
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: form.email.trim(),
+        password: form.password,
+      });
 
       if (signInError) {
         setError(signInError.message);
-        return;
-      }
-
-      const accessToken = signInData?.session?.access_token;
-
-      if (!accessToken) {
-        setError("No se pudo obtener la sesión (access_token).");
-        return;
-      }
-
-      // ✅ Creamos cookie server-side SOLO si el token es válido
-      const resp = await fetch("/api/auth/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken }),
-      });
-
-      const j = await resp.json().catch(() => null);
-
-      if (!resp.ok || !j?.ok) {
-        setError(j?.error || "No se pudo crear la sesión.");
         return;
       }
 
@@ -98,10 +76,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1">
-            <label
-              htmlFor="password"
-              className="text-xs font-semibold text-neutral-700"
-            >
+            <label htmlFor="password" className="text-xs font-semibold text-neutral-700">
               Contraseña
             </label>
             <input

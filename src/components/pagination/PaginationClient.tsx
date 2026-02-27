@@ -35,8 +35,8 @@ export function PaginationClient({
   const prev = Math.max(1, page - 1);
   const next = Math.min(totalPages, page + 1);
 
-  const from = (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
+  const from = Math.min(total, (page - 1) * pageSize + 1);
+  const to = Math.min(total, page * pageSize);
 
   return (
     <div className="mt-4 rounded-3xl border border-neutral-200 bg-white p-4 shadow-sm">

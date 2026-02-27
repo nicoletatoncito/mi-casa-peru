@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type Props = {
-  availableTypes: string[];
-  availableDistricts: string[];
+  availableTypes?: string[];
+  availableDistricts?: string[];
 };
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -17,7 +17,11 @@ function get(sp: URLSearchParams, key: string) {
   return sp.get(key) ?? "";
 }
 
-function buildUrl(pathname: string, sp: URLSearchParams, next: Record<string, string>) {
+function buildUrl(
+  pathname: string,
+  sp: URLSearchParams,
+  next: Record<string, string>
+) {
   const params = new URLSearchParams(sp.toString());
 
   const setOrDelete = (key: string, value: string) => {
@@ -45,7 +49,10 @@ function buildUrl(pathname: string, sp: URLSearchParams, next: Record<string, st
   return qs ? `${pathname}?${qs}` : pathname;
 }
 
-export function PropertiesFiltersClient({ availableTypes, availableDistricts }: Props) {
+export function PropertiesFiltersClient({
+  availableTypes = [],
+  availableDistricts = [],
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -80,7 +87,7 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
   const [baths, setBaths] = useState(initial.baths);
   const [sort, setSort] = useState(initial.sort);
 
-  // ✅ Sync inputs cuando la URL cambia (back/forward, links, paginación)
+  // ✅ Sync inputs cuando cambia URL (back/forward, links, paginación)
   useEffect(() => {
     const s = sp as unknown as URLSearchParams;
 
@@ -140,45 +147,24 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
 
     debounceRef.current = window.setTimeout(() => {
-      pushNow({
-        q,
-        operation,
-        type,
-        district,
-        minPrice,
-        maxPrice,
-        beds,
-        baths,
-        sort,
-      });
+      pushNow({ q, operation, type, district, minPrice, maxPrice, beds, baths, sort });
     }, 450);
   }
 
-  // ✅ Auto-apply inmediato en selects / números (pero no en mount inicial)
+  // ✅ Apply inmediato para selects / números
   useEffect(() => {
     if (!didMountRef.current) return;
-    pushNow({
-      q,
-      operation,
-      type,
-      district,
-      minPrice,
-      maxPrice,
-      beds,
-      baths,
-      sort,
-    });
+    pushNow({ q, operation, type, district, minPrice, maxPrice, beds, baths, sort });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation, type, district, minPrice, maxPrice, beds, baths, sort]);
 
-  // ✅ Auto-apply con debounce en búsqueda
+  // ✅ Debounce solo para búsqueda
   useEffect(() => {
     if (!didMountRef.current) return;
     schedulePushForSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  // ✅ Marcar mount al final (evita push inmediato apenas carga)
   useEffect(() => {
     didMountRef.current = true;
     return () => {
@@ -197,18 +183,7 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
   }
 
   function apply() {
-    // ✅ BOTÓN APLICAR: fuerza push inmediato (aunque debounce esté pendiente)
-    pushNow({
-      q,
-      operation,
-      type,
-      district,
-      minPrice,
-      maxPrice,
-      beds,
-      baths,
-      sort,
-    });
+    pushNow({ q, operation, type, district, minPrice, maxPrice, beds, baths, sort });
   }
 
   return (
@@ -253,7 +228,7 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
             if (e.key === "Enter") apply();
           }}
           disabled={isPending}
-          placeholder="Buscar por distrito, dirección o título"
+          placeholder="Busca por distrito, dirección o palabra clave"
           className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:bg-neutral-50"
         />
 
@@ -316,7 +291,7 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
             value={minPrice}
             onChange={(e) => setMinPrice(e.target.value.replace(/[^\d]/g, ""))}
             disabled={isPending}
-            placeholder="Precio mín (PEN)"
+            placeholder="Precio mín (S/)"
             className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:bg-neutral-50"
             inputMode="numeric"
           />
@@ -324,7 +299,7 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
             value={maxPrice}
             onChange={(e) => setMaxPrice(e.target.value.replace(/[^\d]/g, ""))}
             disabled={isPending}
-            placeholder="Precio máx (PEN)"
+            placeholder="Precio máx (S/)"
             className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-neutral-400 disabled:bg-neutral-50"
             inputMode="numeric"
           />
@@ -358,7 +333,9 @@ export function PropertiesFiltersClient({ availableTypes, availableDistricts }: 
         </div>
 
         <p className="text-xs text-neutral-500">
-          {isPending ? "Actualizando resultados…" : "Los filtros se aplican en el servidor (URL compartible + SEO)."}
+          {isPending
+            ? "Actualizando resultados…"
+            : "Filtros compartibles por URL (ideal para SEO y enviar links)."}
         </p>
       </div>
     </div>
