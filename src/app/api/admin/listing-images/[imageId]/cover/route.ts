@@ -7,7 +7,7 @@ export async function POST(
   try {
     const { imageId } = params;
 
-    // TODO: aquí va tu lógica real para setear el cover
+    // ...tu lógica actual...
 
     return NextResponse.json({ ok: true, imageId });
   } catch (err) {
